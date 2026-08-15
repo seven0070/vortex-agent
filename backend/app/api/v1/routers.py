@@ -16,6 +16,7 @@ from ...knowledge.graph import KnowledgeGraphFactory
 from ...evolution.evolution_engine import EvolutionEngineFactory
 from ...tools.tool_registry import ToolRegistryFactory
 from .settings import settings_router
+from .sessions import sessions_router
 
 # ----------------------------------------------------------------------
 # Dependency – get DB session
@@ -34,6 +35,8 @@ api_router = APIRouter(prefix="/api/v1", tags=["Vortex API"])
 
 # Hermes-like settings + improve sub-router (declares its own /settings prefix)
 api_router.include_router(settings_router)
+# Hermes-like chat sessions sub-router (declares its own /sessions prefix)
+api_router.include_router(sessions_router)
 
 
 # ----------------------------------------------------------------------

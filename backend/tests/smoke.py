@@ -76,6 +76,8 @@ def test_routers_wire():
         "/api/v1/evolution/candidates",
         "/api/v1/governance/logs",
         "/api/v1/benchmarks",
+        "/api/v1/sessions",
+        "/api/v1/sessions/{session_id}/chat",
     ):
         assert expected in paths, f"missing route {expected}"
 
@@ -87,3 +89,30 @@ def test_evolution_candidate(db):
     c = engine.propose_improvement("ci smoke test")
     assert c.candidate_id
     assert c.generation_id
+
+
+def test_tool_registry():
+    from app.core.tools import TOOLS, execute_tool, tool_schemas
+    assert {"terminal", "read_file", "write_file", "list_files", "now"} <= set(TOOLS)
+    assert len(tool_schemas()) == len(TOOLS)
+    out = execute_tool("now", {})
+    assert "UTC" in out
+    out = execute_tool("unknown_tool", {})
+    assert "ERROR" in out
+
+
+def test_chat_session_crud(db):
+    from app.models import ChatMessage, ChatSession
+    s = ChatSession(title="test")
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    assert s.id
+    m = ChatMessage(session_id=s.id, role="user", content="hello")
+    db.add(m)
+    db.commit()
+    count = db.query(ChatMessage).filter(ChatMessage.session_id == s.id).count()
+    assert count == 1
+    db.delete(m)
+    db.delete(s)
+    db.commit()

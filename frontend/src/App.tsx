@@ -1,216 +1,269 @@
-import { useEffect, useState } from 'react'
-import { startBackend, getBackendStatus, onTauriReady } from './lib/tauri'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createSession,
+  deleteSession,
+  getMessages,
+  listSessions,
+  streamChat,
+  type ChatMessage,
+  type Session,
+} from './lib/api'
+import './App.css'
+
+interface LocalMessage extends ChatMessage {
+  streaming?: boolean
+}
 
 function App() {
-  const [backendStatus, setBackendStatus] = useState<{ running: boolean; message: string }>({
-    running: false,
-    message: 'Checking...',
-  })
-  const [logs, setLogs] = useState<string[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<LocalMessage[]>([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [backendUp, setBackendUp] = useState<boolean | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    // Listen for tauri-ready event
-    onTauriReady(() => {
-      addLog('Tauri is ready')
-      checkBackendStatus()
-    })
-
-    // Start backend automatically
-    startBackend().then((msg) => {
-      addLog(msg)
-      setTimeout(checkBackendStatus, 2000)
-    }).catch((err) => {
-      addLog(`Failed to start backend: ${err}`)
-    })
+  // --- backend health ---
+  const checkBackend = useCallback(async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/v1/health')
+      setBackendUp(res.ok)
+    } catch {
+      setBackendUp(false)
+    }
   }, [])
 
-  const addLog = (msg: string) => {
-    const timestamp = new Date().toLocaleTimeString()
-    setLogs(prev => [...prev, `[${timestamp}] ${msg}`])
-  }
+  useEffect(() => {
+    checkBackend()
+    const t = setInterval(checkBackend, 15000)
+    return () => clearInterval(t)
+  }, [checkBackend])
 
-  const checkBackendStatus = async () => {
+  // --- session list ---
+  const refreshSessions = useCallback(async () => {
     try {
-      const status = await getBackendStatus()
-      setBackendStatus(status)
-      addLog(`Backend status: ${status.running ? 'Running' : 'Stopped'} - ${status.message}`)
-    } catch (err) {
-      addLog(`Status check failed: ${err}`)
+      setSessions(await listSessions())
+    } catch (e) {
+      setError(`Failed to load sessions: ${e}`)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshSessions()
+  }, [refreshSessions])
+
+  // --- load messages for a session ---
+  const loadMessages = useCallback(async (id: string) => {
+    setActiveId(id)
+    setMessages([])
+    setError(null)
+    try {
+      const msgs = await getMessages(id)
+      setMessages(msgs)
+    } catch (e) {
+      setError(`Failed to load messages: ${e}`)
+    }
+  }, [])
+
+  // --- new chat ---
+  const newChat = async () => {
+    try {
+      const s = await createSession()
+      await refreshSessions()
+      setActiveId(s.id)
+      setMessages([])
+    } catch (e) {
+      setError(`Failed to create session: ${e}`)
     }
   }
 
+  // --- delete session ---
+  const removeSession = async (id: string) => {
+    try {
+      await deleteSession(id)
+      if (activeId === id) {
+        setActiveId(null)
+        setMessages([])
+      }
+      await refreshSessions()
+    } catch (e) {
+      setError(`Failed to delete session: ${e}`)
+    }
+  }
+
+  // --- send + stream ---
+  const send = async () => {
+    const text = input.trim()
+    if (!text || busy || !activeId) return
+    setInput('')
+    setBusy(true)
+    setError(null)
+
+    // optimistically append user message + placeholder assistant
+    const userMsg: LocalMessage = {
+      id: `local-${Date.now()}`,
+      session_id: activeId,
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+    }
+    const asstMsg: LocalMessage = {
+      id: `local-asst-${Date.now()}`,
+      session_id: activeId,
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+      streaming: true,
+    }
+    setMessages((prev) => [...prev, userMsg, asstMsg])
+
+    const abort = new AbortController()
+    abortRef.current = abort
+
+    let acc = ''
+    try {
+      await streamChat(
+        activeId,
+        text,
+        (evt) => {
+          if (evt.type === 'delta' && evt.content) {
+            acc += evt.content
+            setMessages((prev) =>
+              prev.map((m) => (m.id === asstMsg.id ? { ...m, content: acc } : m)),
+            )
+          } else if (evt.type === 'tool') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === asstMsg.id
+                  ? { ...m, content: m.content + `\n\n[🔧 ${evt.name}] ${evt.output}\n` }
+                  : m,
+              ),
+            )
+          } else if (evt.type === 'error') {
+            setError(evt.message || 'chat error')
+          }
+        },
+        abort.signal,
+      )
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        setError(`Chat failed: ${e}`)
+      }
+    } finally {
+      abortRef.current = null
+      setMessages((prev) =>
+        prev.map((m) => (m.id === asstMsg.id ? { ...m, streaming: false } : m)),
+      )
+      setBusy(false)
+      await refreshSessions()
+    }
+  }
+
+  const stop = () => {
+    abortRef.current?.abort()
+  }
+
+  // --- autoscroll ---
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [messages])
+
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.title}>Vortex Agent</h1>
-        <div style={styles.statusBadge}>
-          <span style={{
-            ...styles.statusDot,
-            backgroundColor: backendStatus.running ? '#10b981' : '#ef4444'
-          }} />
-          <span>{backendStatus.running ? 'Backend Running' : 'Backend Stopped'}</span>
+    <div className="app">
+      {/* Sidebar */}
+      <aside className="sidebar">
+        <div className="sidebar-head">
+          <span className="logo">◈</span>
+          <h1>Vortex</h1>
         </div>
-      </header>
-
-      <main style={styles.main}>
-        <section style={styles.panel}>
-          <h2 style={styles.panelTitle}>System Status</h2>
-          <p style={styles.statusMessage}>{backendStatus.message}</p>
-          
-          <div style={styles.buttonGroup}>
-            <button 
-              onClick={checkBackendStatus}
-              style={styles.button}
+        <button className="new-chat" onClick={newChat}>
+          + New Chat
+        </button>
+        <nav className="session-list">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={`session-item ${s.id === activeId ? 'active' : ''}`}
+              onClick={() => loadMessages(s.id)}
             >
-              Refresh Status
-            </button>
-          </div>
-        </section>
+              <span className="session-title">{s.title || 'New chat'}</span>
+              <button
+                className="session-del"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeSession(s.id)
+                }}
+                title="Delete"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {sessions.length === 0 && <div className="empty">No chats yet</div>}
+        </nav>
+        <div className="sidebar-foot">
+          <span className={`dot ${backendUp ? 'ok' : 'down'}`} />
+          {backendUp === null ? 'checking…' : backendUp ? 'backend online' : 'backend offline'}
+        </div>
+      </aside>
 
-        <section style={styles.panel}>
-          <h2 style={styles.panelTitle}>Activity Log</h2>
-          <div style={styles.logContainer}>
-            {logs.map((log, idx) => (
-              <div key={idx} style={styles.logEntry}>{log}</div>
-            ))}
-            {logs.length === 0 && <div style={styles.emptyLog}>No activity yet...</div>}
-          </div>
-        </section>
-
-        <section style={styles.panel}>
-          <h2 style={styles.panelTitle}>Quick Actions</h2>
-          <div style={styles.buttonGroup}>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Start Chat
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Create Task
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Open Council
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              View Memory
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Knowledge Graph
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Governance
-            </button>
-            <button style={styles.button} disabled={!backendStatus.running}>
-              Evolution
+      {/* Main chat pane */}
+      <main className="chat">
+        {!activeId ? (
+          <div className="welcome">
+            <h2>Vortex Agent</h2>
+            <p>Autonomous local-first AI — with tools, memory, and a council.</p>
+            <button className="new-chat" onClick={newChat}>
+              Start a conversation
             </button>
           </div>
-        </section>
+        ) : (
+          <>
+            <div className="messages" ref={scrollRef}>
+              {messages.length === 0 && (
+                <div className="empty-chat">Ask anything. I can run tools on the repo.</div>
+              )}
+              {messages.map((m) => (
+                <div key={m.id} className={`msg ${m.role}`}>
+                  <div className="msg-role">{m.role === 'user' ? 'You' : 'Vortex'}</div>
+                  <div className="msg-content">
+                    {m.content}
+                    {m.streaming && <span className="caret">▍</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {error && <div className="error-banner">{error}</div>}
+            <div className="input-row">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    send()
+                  }
+                }}
+                placeholder="Message Vortex… (Enter to send, Shift+Enter for newline)"
+                rows={2}
+              />
+              {busy ? (
+                <button className="send stop" onClick={stop}>
+                  ■ Stop
+                </button>
+              ) : (
+                <button className="send" onClick={send} disabled={!input.trim()}>
+                  ➤
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </main>
     </div>
   )
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-    minHeight: '100vh',
-    backgroundColor: '#f8f9fa',
-    color: '#1d1d1f',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '24px 32px',
-    borderBottom: '1px solid #e5e5e5',
-    backgroundColor: '#ffffff',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-  },
-  title: {
-    margin: 0,
-    fontSize: '28px',
-    fontWeight: 600,
-    letterSpacing: '-0.02em',
-    background: 'linear-gradient(135deg, #0071e3, #00c6ff)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  statusBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 16px',
-    borderRadius: '9999px',
-    backgroundColor: '#f0f4f8',
-    fontSize: '14px',
-    fontWeight: 500,
-  },
-  statusDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-  },
-  main: {
-    padding: '32px',
-    maxWidth: '1200px',
-    margin: '0 auto',
-  },
-  panel: {
-    backgroundColor: '#ffffff',
-    borderRadius: '16px',
-    padding: '24px',
-    marginBottom: '24px',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.04), 0 1px 4px rgba(0,0,0,0.02)',
-    border: '1px solid #eef2f7',
-  },
-  panelTitle: {
-    margin: '0 0 16px 0',
-    fontSize: '18px',
-    fontWeight: 600,
-    color: '#1d1d1f',
-  },
-  statusMessage: {
-    margin: '0 0 16px 0',
-    color: '#6e6e73',
-    fontSize: '15px',
-    lineHeight: 1.5,
-  },
-  buttonGroup: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '12px',
-  },
-  button: {
-    padding: '10px 20px',
-    borderRadius: '10px',
-    border: 'none',
-    backgroundColor: '#0071e3',
-    color: '#ffffff',
-    fontSize: '14px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    boxShadow: '0 2px 8px rgba(0,113,227,0.25)',
-  },
-  logContainer: {
-    maxHeight: '300px',
-    overflowY: 'auto',
-    backgroundColor: '#1d1d1f',
-    borderRadius: '10px',
-    padding: '16px',
-    fontFamily: 'SF Mono, Monaco, "Courier New", monospace',
-    fontSize: '12px',
-    lineHeight: 1.6,
-  },
-  logEntry: {
-    color: '#d4d4d4',
-    borderBottom: '1px solid #2d2d2d',
-    padding: '4px 0',
-  },
-  emptyLog: {
-    color: '#6e6e73',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: '32px',
-  },
 }
 
 export default App
