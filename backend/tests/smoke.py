@@ -65,10 +65,10 @@ def test_llm_client_import():
 
 def test_routers_wire():
     from app.main import app
-    # Some FastAPI versions expose included routers as _IncludedRouter objects
-    # without .path — filter to route objects that actually have paths.
-    paths = {getattr(r, "path", None) for r in app.routes}
-    paths.discard(None)
+    # Authoritative route check: the OpenAPI schema lists every path the app
+    # actually serves, regardless of FastAPI's internal router representation
+    # (older versions flatten app.routes, newer ones wrap them in _IncludedRouter).
+    paths = set(app.openapi()["paths"].keys())
     for expected in (
         "/api/v1/health",
         "/api/v1/settings",
