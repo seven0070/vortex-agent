@@ -61,6 +61,10 @@ def _post(path, payload, host=DEFAULT_HOST, **kw):
     return _request("POST", path, payload=payload, host=host, **kw)
 
 
+def _put(path, payload, host=DEFAULT_HOST, **kw):
+    return _request("PUT", path, payload=payload, host=host, **kw)
+
+
 def _dump(obj):
     print(json.dumps(obj, indent=2, ensure_ascii=False, default=str))
 
@@ -78,7 +82,7 @@ def cmd_status(args):
 
 
 def cmd_agents(args):
-    data = _get("/agents", host=args.host)
+    data = _get(f"/agents?user_id={args.user_id}", host=args.host)
     _dump(data)
 
 
@@ -157,6 +161,48 @@ def cmd_trace(args):
     _dump(_get(f"/observability/trace?task_id={args.task_id}", host=args.host))
 
 
+def cmd_config(args):
+    if args.action == "list":
+        _dump(_get("/settings", host=args.host))
+    elif args.action == "get":
+        data = _get("/settings", host=args.host)
+        key = args.key
+        settings = data.get("settings", {})
+        if key not in settings:
+            print(f"❌ Unknown setting '{key}'. Known: {', '.join(settings.keys())}", file=sys.stderr)
+            sys.exit(1)
+        print(f"{key} = {settings[key]}")
+    elif args.action == "set":
+        _dump(_put("/settings", {args.key: _coerce(args.value)}, host=args.host))
+    elif args.action == "health":
+        _dump(_get("/settings/health", host=args.host))
+
+
+def _coerce(value: str):
+    """Best-effort JSON coercion: true/false/null/numbers stay typed."""
+    lowered = value.lower()
+    if lowered in ("true", "false"):
+        return lowered == "true"
+    if lowered in ("null", "none"):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value
+
+
+def cmd_improve(args):
+    payload = {}
+    if args.hypothesis:
+        payload["hypothesis"] = args.hypothesis
+    _dump(_post("/settings/improve", payload, host=args.host))
+
+
 # ----------------------------------------------------------------------
 # Argument parser
 # ----------------------------------------------------------------------
@@ -170,7 +216,7 @@ def build_parser():
 
     sub.add_parser("status", help="Check backend health")
 
-    sub.add_parser("agents", help="List agents")
+    sub.add_parser("agents", help="List agents").add_argument("--user-id", default="cli-user")
 
     chat = sub.add_parser("chat", help="Send a chat message")
     chat.add_argument("message")
@@ -236,6 +282,19 @@ def build_parser():
     trace = sub.add_parser("trace", help="Observability trace for a task")
     trace.add_argument("task_id")
 
+    conf = sub.add_parser("config", help="View/change runtime settings")
+    conf_sub = conf.add_subparsers(dest="action", required=True)
+    conf_sub.add_parser("list", help="Show all effective settings")
+    conf_get = conf_sub.add_parser("get")
+    conf_get.add_argument("key")
+    conf_set = conf_sub.add_parser("set")
+    conf_set.add_argument("key")
+    conf_set.add_argument("value")
+    conf_sub.add_parser("health", help="LLM connectivity + config summary")
+
+    improve = sub.add_parser("improve", help="Self-audit + propose improvements (EvolutionEngine)")
+    improve.add_argument("--hypothesis", default=None, help="Custom improvement idea")
+
     return p
 
 
@@ -253,20 +312,10 @@ def main(argv=None):
         args.tool_args = kv
 
     try:
-        globals()[f"cmd_{cmd}"](
-            args
-            if cmd in ("status", "agents", "chat", "orchestrate", "task", "council", "benchmarks")
-            else _namespace_wrap(cmd, args)
-        )
+        globals()[f"cmd_{cmd}"](args)
     except ApiError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
-
-
-def _namespace_wrap(cmd, args):
-    """Handlers for subcommand-based commands receive the top-level args object
-    which already carries the nested action/params — no wrapping needed."""
-    return args
 
 
 if __name__ == "__main__":

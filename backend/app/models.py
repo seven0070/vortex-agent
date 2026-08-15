@@ -24,7 +24,13 @@ from sqlalchemy.sql import func
 from .vortex.config import SQLITE_URL
 
 Base = declarative_base()
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=create_engine(SQLITE_URL))
+_engine = create_engine(SQLITE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+
+def create_engine_from_config():
+    """Return the shared SQLAlchemy engine (used for create_all on startup)."""
+    return _engine
 
 
 # ----------------------------------------------------------------------
@@ -238,3 +244,37 @@ class BenchmarkRun(Base):
 
     def __repr__(self) -> str:
         return f"<BenchmarkRun run_id={self.run_id}>"
+
+
+# ----------------------------------------------------------------------
+# Hermes-like chat core models (sessions + messages)
+# ----------------------------------------------------------------------
+class ChatSession(Base):
+    """A chat session in the Hermes-like streaming chat core."""
+
+    __tablename__ = "chat_sessions"
+
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title: str = Column(String, default="New chat")
+    created_at: DateTime = Column(DateTime, default=datetime.utcnow)
+    updated_at: DateTime = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    def __repr__(self) -> str:
+        return f"<ChatSession id={self.id} title={self.title}>"
+
+
+class ChatMessage(Base):
+    """A single message inside a chat session."""
+
+    __tablename__ = "chat_messages"
+
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: str = Column(String, nullable=False, index=True)
+    role: str = Column(String, nullable=False)  # user | assistant | tool
+    content: Text = Column(Text, nullable=False)
+    created_at: DateTime = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<ChatMessage id={self.id} role={self.role}>"

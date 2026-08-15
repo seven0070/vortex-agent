@@ -99,7 +99,7 @@ class GovernanceEngine:
 
         # Simple fnmatch → regex conversion (supports * ? [..] [])
         regex_pat = "^" + re.escape(glob_pat).replace("\\*", ".*").replace("\\?", ".").replace("\\[", "[").replace("\\]", "]") + "$"
-        return re.compile(regex_pat.match).match
+        return re.compile(regex_pat).match
 
     # ------------------------------------------------------------------
     # Core decision logic
@@ -228,13 +228,16 @@ class GovernanceEngine:
         rationale: str,
         requested_by: str,
         extra: Dict[str, Any] | None = None,
+        resource: str | None = None,
     ) -> None:
         """
         Persist a governance decision record.
         ``extra`` can hold additional context (e.g., resource path).
+        ``resource`` is stored directly (column is NOT NULL — fall back to operation).
         """
         log = GovernanceLog(
             operation=operation,
+            resource=resource or operation,
             decision=decision,
             rationale=rationale,
             requested_by=requested_by,

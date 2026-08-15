@@ -29,11 +29,14 @@ app = FastAPI(
 )
 
 # ----------------------------------------------------------------------
-# CORS – allow the Tauri UI (running on localhost:7777 by default)
+# CORS – allow frontend origins (configurable via vortex-data/settings.json)
 # ----------------------------------------------------------------------
+from .vortex.settings import get_setting
+
+_cors_origins = get_setting("cors_origins") or ["http://localhost:7777"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:7777"],
+    allow_origins=_cors_origins if isinstance(_cors_origins, list) else [_cors_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +64,10 @@ def read_root():
 @app.on_event("startup")
 async def on_startup():
     logger.info("Vortex Agent backend starting up...")
+    # Ensure all tables (incl. chat_sessions / chat_messages) exist
+    from .models import Base, create_engine_from_config
+    Base.metadata.create_all(bind=create_engine_from_config())
+    logger.info("Database tables ensured.")
     # Lazy load heavy components here if needed
     pass
 

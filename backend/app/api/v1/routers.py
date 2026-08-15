@@ -15,6 +15,7 @@ from ...sovereign.sovereign import SovereignEngine
 from ...knowledge.graph import KnowledgeGraphFactory
 from ...evolution.evolution_engine import EvolutionEngineFactory
 from ...tools.tool_registry import ToolRegistryFactory
+from .settings import settings_router
 
 # ----------------------------------------------------------------------
 # Dependency – get DB session
@@ -30,6 +31,9 @@ def get_db():
 # Router
 # ----------------------------------------------------------------------
 api_router = APIRouter(prefix="/api/v1", tags=["Vortex API"])
+
+# Hermes-like settings + improve sub-router (declares its own /settings prefix)
+api_router.include_router(settings_router)
 
 
 # ----------------------------------------------------------------------
@@ -255,7 +259,7 @@ def governance_check(request: Dict[str, Any], db: Session = Depends(get_db)):
 
 @api_router.get("/governance/logs")
 def governance_logs(limit: int = 100, db: Session = Depends(get_db)):
-    from ..models import GovernanceLog
+    from ...models import GovernanceLog
     logs = db.query(GovernanceLog).order_by(GovernanceLog.timestamp.desc()).limit(limit).all()
     return {"logs": [{"log_id": l.log_id, "operation": l.operation, "decision": l.decision, "rationale": l.rationale, "requested_by": l.requested_by, "timestamp": l.timestamp} for l in logs]}
 
@@ -330,7 +334,7 @@ def evolution_propose(request: Dict[str, Any], db: Session = Depends(get_db)):
 
 @api_router.get("/evolution/candidates")
 def evolution_candidates(db: Session = Depends(get_db)):
-    from ..models import EvolutionCandidate
+    from ...models import EvolutionCandidate
     candidates = db.query(EvolutionCandidate).order_by(EvolutionCandidate.created_at.desc()).limit(20).all()
     return {"candidates": [{"candidate_id": c.candidate_id, "generation_id": c.generation_id, "hypothesis": c.hypothesis, "decision": c.decision, "created_at": c.created_at} for c in candidates]}
 
@@ -340,7 +344,7 @@ def evolution_candidates(db: Session = Depends(get_db)):
 # ----------------------------------------------------------------------
 @api_router.get("/benchmarks")
 def benchmark_runs(db: Session = Depends(get_db)):
-    from ..models import BenchmarkRun
+    from ...models import BenchmarkRun
     runs = db.query(BenchmarkRun).order_by(BenchmarkRun.executed_at.desc()).limit(50).all()
     return {"runs": [{"run_id": r.run_id, "candidate_id": r.candidate_id, "benchmark_name": r.benchmark_name, "score": r.score, "executed_at": r.executed_at} for r in runs]}
 
