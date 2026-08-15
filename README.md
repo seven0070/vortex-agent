@@ -1,3 +1,5 @@
+ ![Alt text](https://github.com/seven0070/vortex-agent/blob/30a9324caba88b88902d4555294977788a4d57e7/blackhole.png)
+
 # Vortex Agent
 
 Autonomous, local-first AI agent platform with a council of specialized agents, persistent memory, knowledge graph, governance engine, and sovereign self-management.
