@@ -72,7 +72,7 @@ jobs:
           - os: windows-latest
             platform: windows
             target: x86_64-pc-windows-msvc
-          - os: macos-latest
+          - os: macos-13
             platform: macos
             target: x86_64-apple-darwin
           - os: macos-latest
