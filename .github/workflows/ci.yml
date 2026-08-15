@@ -11,7 +11,7 @@ on:
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "22"
-  RUST_VERSION: "1.85"
+  RUST_VERSION: "stable"  # latest Tauri 2 crates require rustc > 1.85 (e.g. 1.97)
   VORTEX_LLM_BASE_URL: "http://localhost:8645/v1"  # CI never reaches a real LLM
 
 jobs:
