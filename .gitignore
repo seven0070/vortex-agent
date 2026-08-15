@@ -7,6 +7,7 @@ venv/
 
 # Runtime data / logs
 backend/vortex-data/
+backend/vortex-data-test/
 *.log
 
 # Node / frontend
