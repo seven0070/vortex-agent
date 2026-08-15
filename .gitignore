@@ -19,6 +19,12 @@ frontend/build_tauri.log
 frontend/src-tauri/target/
 frontend/src-tauri/gen/
 
+# PyInstaller backend bundle (built by CI, not committed)
+backend/dist/
+backend/build/
+backend/.build-venv/
+frontend/src-tauri/binaries/
+
 # Editor / OS
 .vscode/
 .idea/

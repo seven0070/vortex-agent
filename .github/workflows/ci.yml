@@ -75,6 +75,9 @@ jobs:
           - os: macos-latest
             platform: macos
             target: x86_64-apple-darwin
+          - os: macos-latest
+            platform: macos-arm64
+            target: aarch64-apple-darwin
           - os: ubuntu-latest
             platform: linux
             target: x86_64-unknown-linux-gnu
@@ -109,6 +112,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Set up Python (backend bundling)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Bundle backend with PyInstaller
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          python -m PyInstaller vortex-backend.spec --noconfirm
+
+      - name: Place sidecar for Tauri (target-triple naming)
+        shell: bash
+        run: |
+          mkdir -p frontend/src-tauri/binaries
+          # Tauri requires: <name>-<target-triple><ext>
+          SIDECAR="frontend/src-tauri/binaries/vortex-backend-${{ matrix.target }}"
+          case "${{ matrix.platform }}" in
+            windows*) cp backend/dist/vortex-backend.exe "$SIDECAR.exe" ;;
+            macos*)   cp backend/dist/vortex-backend "$SIDECAR" ;;
+            linux*)   cp backend/dist/vortex-backend "$SIDECAR" ;;
+          esac
+          ls -la frontend/src-tauri/binaries/
 
       - name: Build Tauri app
         working-directory: frontend

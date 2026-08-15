@@ -29,6 +29,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/vortex-backend"
+    ],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"

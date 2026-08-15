@@ -13,9 +13,9 @@ import json
 import os
 from pathlib import Path
 
-from .config import DATA_DIR
+from .config import CONFIG_DIR
 
-SETTINGS_FILE = Path(DATA_DIR) / "settings.json"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
 
 DEFAULTS = {
     "llm_base_url": "http://localhost:8645/v1",

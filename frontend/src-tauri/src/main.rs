@@ -1,6 +1,11 @@
 //! Vortex Agent - Tauri 2.x Desktop Application Entry Point
 
-use tauri::{Emitter, Manager};
+use std::sync::Mutex;
+
+use tauri::{Emitter, Manager, State};
+
+/// Holds the running backend child process (if any).
+struct BackendState(Mutex<Option<tauri_plugin_shell::process::CommandChild>>);
 
 fn main() {
     // Initialize tracing for structured logging
@@ -15,6 +20,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(BackendState(Mutex::new(None)))
         .setup(|app| {
             // Get the main window
             let window = app.get_webview_window("main").unwrap();
@@ -34,7 +40,6 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Backend commands will be registered here
             greet,
             start_backend,
             stop_backend,
@@ -50,25 +55,48 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Vortex Agent.", name)
 }
 
-/// Start the Vortex backend server
+/// Start the Vortex backend server (bundled executable or python dev mode).
 #[tauri::command]
-async fn start_backend(app_handle: tauri::AppHandle) -> Result<String, String> {
+async fn start_backend(app: tauri::AppHandle, state: State<'_, BackendState>) -> Result<String, String> {
     use tauri_plugin_shell::ShellExt;
 
-    let shell = app_handle.shell();
+    // Refuse to double-start
+    {
+        let guard = state.0.lock().map_err(|_| "backend state poisoned")?;
+        if guard.is_some() {
+            return Ok("Backend already running".to_string());
+        }
+    }
 
-    // Start the Python backend using the configured shell command
-    let (mut rx, _child) = shell
-        .command("python")
-        .args([
-            "-m", "uvicorn",
-            "app.main:app",
-            "--host", "0.0.0.0",
-            "--port", "8000"
-        ])
-        .current_dir("../backend")
+    let shell = app.shell();
+
+    // Prefer the PyInstaller-bundled executable (shipped next to the app);
+    // fall back to `python -m uvicorn` for dev.
+    let mut cmd = shell.sidecar("vortex-backend")
+        .map_err(|_| "sidecar not configured")?;
+    if !std::path::Path::new("vortex-backend").exists()
+        && !std::path::Path::new("vortex-backend.exe").exists()
+    {
+        cmd = shell
+            .command("python")
+            .args([
+                "-m", "uvicorn",
+                "app.main:app",
+                "--host", "0.0.0.0",
+                "--port", "8000",
+            ])
+            .current_dir("../backend");
+    }
+
+    let (mut rx, child) = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn backend: {}", e))?;
+
+    // Track the child so stop_backend can kill it
+    {
+        let mut guard = state.0.lock().map_err(|_| "backend state poisoned")?;
+        *guard = Some(child);
+    }
 
     // Read stdout/stderr for logging
     tauri::async_runtime::spawn(async move {
@@ -88,20 +116,37 @@ async fn start_backend(app_handle: tauri::AppHandle) -> Result<String, String> {
     Ok("Backend started".to_string())
 }
 
-/// Stop the backend server
+/// Stop the backend server: kill the tracked child process.
 #[tauri::command]
-async fn stop_backend() -> Result<String, String> {
-    // In a real implementation, we'd track the child process and kill it
-    Ok("Backend stop requested".to_string())
+async fn stop_backend(state: State<'_, BackendState>) -> Result<String, String> {
+    let mut guard = state.0.lock().map_err(|_| "backend state poisoned")?;
+    if let Some(child) = guard.take() {
+        // Kill the process tree so uvicorn's reloader worker dies too.
+        child.kill().map_err(|e| format!("Failed to kill backend: {}", e))?;
+        Ok("Backend stopped".to_string())
+    } else {
+        Ok("Backend not running".to_string())
+    }
 }
 
-/// Get backend status
+/// Get backend status: whether we spawned a process, plus live health check.
 #[tauri::command]
-async fn get_backend_status() -> Result<serde_json::Value, String> {
-    // In a real implementation, we'd check if the backend process is running
-    // and possibly call its health endpoint
+async fn get_backend_status(state: State<'_, BackendState>) -> Result<serde_json::Value, String> {
+    let is_spawned = {
+        let guard = state.0.lock().map_err(|_| "backend state poisoned")?;
+        guard.is_some()
+    };
+
+    // Best-effort HTTP health check
+    let healthy = match reqwest::blocking::get("http://localhost:8000/api/v1/health") {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    };
+
     Ok(serde_json::json!({
-        "running": false,
-        "message": "Status check not fully implemented"
+        "running": is_spawned || healthy,
+        "spawned": is_spawned,
+        "healthy": healthy,
+        "message": if healthy { "Backend healthy" } else if is_spawned { "Backend starting" } else { "Backend not running" }
     }))
 }
