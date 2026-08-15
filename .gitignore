@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime data / logs
+backend/vortex-data/
+*.log
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/build_tauri.log
+
+# Rust / Tauri build artifacts
+frontend/src-tauri/target/
+frontend/src-tauri/gen/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

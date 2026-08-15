@@ -1,6 +1,6 @@
 //! Vortex Agent - Tauri 2.x Desktop Application Entry Point
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     // Initialize tracing for structured logging
@@ -15,7 +15,6 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Get the main window
             let window = app.get_webview_window("main").unwrap();
@@ -55,7 +54,6 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 async fn start_backend(app_handle: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_shell::ShellExt;
-    use std::process::Stdio;
 
     let shell = app_handle.shell();
 

@@ -44,7 +44,9 @@ app.add_middleware(
 # ----------------------------------------------------------------------
 from .api.v1 import routers
 
-app.include_router(routers.api_router, prefix="/api/v1")
+# routers.api_router already declares prefix="/api/v1" in routers.py;
+# do NOT add a second prefix here or paths become /api/v1/api/v1/...
+app.include_router(routers.api_router)
 
 # ----------------------------------------------------------------------
 # Root endpoint (health check)

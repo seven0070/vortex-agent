@@ -5,6 +5,10 @@ description = "Vortex Agent - Autonomous Local-First AI Platform"
 authors = ["Vortex Team"]
 edition = "2021"
 
+# Standalone workspace root — prevents Cargo from inheriting the broken
+# C:\Users\sanath\Cargo.toml workspace (which references missing submodules).
+[workspace]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -19,7 +23,6 @@ tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-updater = "2"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
