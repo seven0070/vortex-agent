@@ -1,0 +1,71 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+sqlite-utils
+SQLAlchemy
+psycopg2-binary
+# Optional LLM inference (commented out)
+# transformers
+# accelerate
+# sentencepiece
+# faiss-cpu
+# embeddings
+# tqdm
+# click
+# rich
+# uvloop
+# tenacity
+# cachetools
+# xmlschema
+# jsonschema
+# builder
+# packaging
+# toml
+# poetry-core
+# poetry
+# rpyc
+# importlib-metadata
+# execnet
+# typing-extensions
+# typing-inspection
+# python-slugify
+# markdown-it-py
+# frontmatter
+# aiohttp
+# httpx
+# beautifulsoup4
+# lxml
+# pyyaml
+# jsonschema
+# pygments
+# platformdirs
+# ruamel.yaml
+# python-magic
+# python-slugify
+# pyyaml
+# rich-exceptions
+# safelec
+# semver
+# starlette
+# types-PyYAML
+# types-requests
+# types-beautifulsoup4
+# types-lxml
+# types-python-magic
+# types-pkg-resources
+# types-click
+# types-PyQt5
+# types-requests
+# types-pydantic
+# types-SQLAlchemy
+# types-PyYAML
+# types-rfc3987
+# types-stringprep
+# types-urllib3
+# types-smart-open
+# types-PyPDF2
+# types-PyYAML
+# types-Pydantic
+# types-requests
+# types-PyYAML
