@@ -1,0 +1,154 @@
+name: Vortex Agent CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch: {}
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+  RUST_VERSION: "1.85"
+  VORTEX_LLM_BASE_URL: "http://localhost:8645/v1"  # CI never reaches a real LLM
+
+jobs:
+  # ------------------------------------------------------------------
+  # 1. TEST — backend smoke tests + frontend typecheck/build
+  # ------------------------------------------------------------------
+  test:
+    name: Test (backend + frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pytest
+
+      - name: Backend smoke tests
+        working-directory: backend
+        run: python -m pytest tests/smoke.py -v
+
+      - name: Backend imports & app wiring
+        working-directory: backend
+        run: python -c "from app.main import app; print('app OK, routes:', len(app.routes))"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Frontend typecheck + build
+        working-directory: frontend
+        run: npm run build
+
+  # ------------------------------------------------------------------
+  # 2. BUILD — Tauri desktop app (Windows / macOS / Linux)
+  # ------------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            platform: macos
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Linux system deps (webkit2gtk etc.)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Build Tauri app
+        working-directory: frontend
+        run: npm run tauri:build
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p dist-app
+          cp -r frontend/src-tauri/target/release/bundle/* dist-app/ 2>/dev/null || true
+          cp frontend/src-tauri/target/release/vortex-agent* dist-app/ 2>/dev/null || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vortex-agent-${{ matrix.platform }}
+          path: dist-app/
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # 3. RELEASE — attach installers to GitHub Release on version tags
+  # ------------------------------------------------------------------
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**
+          generate_release_notes: true
